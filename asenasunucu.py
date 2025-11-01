@@ -6,7 +6,6 @@ import os
 from datetime import datetime, timedelta
 import sqlite3
 from groq import Groq
-from typing import Any
 import re
 import threading
 import time
@@ -18,29 +17,10 @@ import sqlite3
 import re
 from functools import wraps
 from dotenv import load_dotenv
-from memory_manager import get_memory_manager
-from conversation_summarizer import get_conversation_summarizer
-from weather_service import get_weather_service, get_morning_weather
-from enhanced_features import (
-    ProactiveAssistant, FamilyIntelligence, EnhancedEmotionalIntelligence,
-    ConversationIntelligence, SmartHomeControl, SmartScheduler,
-    PersonalizationEngine, AnalyticsEngine, QuickSolutions
-)
-from response_cache import get_response_cache
-from advanced_context import get_advanced_context_builder
-from tv_manager import get_tv_manager
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # .env dosyasını yükle
 load_dotenv()
-
-# Asena AI Asistanın Kişiliği - DÜZELTILDI
-ASENA_PERSONALITY = {
-    "name": "Asena",
-    "role": "AI Asistan",
-    "description": "Yardımcı, anlayışlı ve empatik bir yapay zeka asistanı",
-    "capabilities": ["Konuşma", "Hatırlatmalar", "Ev Otomasyonu", "Duygusal Destek", "Planlama"],
-}
 
 # Başlangıç hafızası
 INITIAL_MEMORIES = {
@@ -52,9 +32,9 @@ INITIAL_MEMORIES = {
             "kişilik": ["mantıklı", "meraklı", "teknolojiye düşkün", "analitik düşünmeyi seven"]
         },
         "çalışma": {
-            "meslek": "E-Ticaret Uzmanı ve Yazılımcı",
-            "çalışma_saatleri": "Hafta içi 09:00 - 18:00",
-            "hedef": "Kendi şirketini kurmak",
+            "meslek": "Siber güvenlik uzmanı",
+            "çalışma_saatleri": "Hafta içi 09:00 - 19:00",
+            "hedef": "Kendi siber güvenlik şirketini kurmak",
             "projeler": ["AI Destekli Psikolog Terminali", "Asena Akıllı Ev Asistanı"]
         },
         "hobiler": ["Piyano çalmak", "Felsefe ve astrofizik okumak", "Film izlemek", "Yapay zeka projeleri geliştirmek"],
@@ -75,7 +55,7 @@ INITIAL_MEMORIES = {
             "kişilik": ["sıcakkanlı", "sabırlı", "enerjik", "çocuklarla iletişimi güçlü"]
         },
         "çalışma": {
-            "meslek": "Fitness antrenörü",
+            "meslek": "Fitness ve çocuklar için jimnastik antrenörü",
             "çalışma_yerleri": ["Maverapark"],
             "çalışma_saatleri": {
                 "Pazartesi": "İzinli",
@@ -102,10 +82,10 @@ INITIAL_MEMORIES = {
 try:
     GROQ_API_KEY = os.getenv('GROQ_API_KEY')
     if not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY ortam değişkeninde bulunamadı. Lütfen .env dosyasına Groq API anahtarınızı ekleyin.")
+        raise ValueError("GROQ_API_KEY bulunamadı!")
 except Exception as e:
     print(f"Hata: {e}")
-    raise
+    GROQ_API_KEY = "gsk_8h0geO4igEVBlnmSDWGdyb3FYlx0dJbq5oEAyN9NdxjWW1exv"
 
 # Hatırlatıcı modülüne bildirim fonksiyonunu ilet
 asena_hatirlatici.set_notification_callback(send_notification)
@@ -113,23 +93,6 @@ asena_hatirlatici.set_notification_callback(send_notification)
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False
 CORS(app)
-
-# Initialize memory manager and summarizer
-memory_manager = get_memory_manager()
-conversation_summarizer = get_conversation_summarizer()
-response_cache = get_response_cache()
-advanced_context_builder = get_advanced_context_builder()
-
-# Initialize new enhanced features
-proactive_assistant = ProactiveAssistant()
-family_intelligence = FamilyIntelligence()
-emotional_intelligence = EnhancedEmotionalIntelligence()
-conversation_intelligence = ConversationIntelligence()
-smart_home = SmartHomeControl()
-smartscheduler = SmartScheduler()
-personalization = PersonalizationEngine()
-analytics = AnalyticsEngine()
-quick_solutions = QuickSolutions()
 
 # UTF-8 Encoding
 import sys
@@ -139,7 +102,8 @@ if sys.stdout.encoding != 'utf-8':
 if sys.stderr.encoding != 'utf-8':
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
-# Groq API (Önceki tanımlanmıştır)
+# Groq API
+GROQ_API_KEY = "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"
 
 def initialize_groq():
     try:
@@ -156,66 +120,61 @@ except Exception as e:
     print(f"Groq client oluşturulamadı: {e}")
     groq_client = None
 
-
-
-def load_permanent_memories_to_manager():
-    """İNITIAL_MEMORIES'den kalıcı hafızaları memory_manager'a yükle"""
-    try:
-        for user_name, user_data in INITIAL_MEMORIES.items():
-            # Kişisel bilgiler
-            if 'kişisel' in user_data:
-                personal_info = user_data['kişisel']
-                for key, value in personal_info.items():
-                    if isinstance(value, list):
-                        value = ', '.join(value)
-                    memory_manager.add_memory(
-                        user_name=user_name,
-                        memory_type='personal',
-                        content=f"{key}: {value}",
-                        importance=8,
-                        is_permanent=True
-                    )
-            
-            # Çalışma bilgileri
-            if 'çalışma' in user_data:
-                work_info = user_data['çalışma']
-                for key, value in work_info.items():
-                    if isinstance(value, dict):
-                        # Çalışma saatleri gibi diçer yapıları string'e dönüştür
-                        value = str(value)
-                    memory_manager.add_memory(
-                        user_name=user_name,
-                        memory_type='work',
-                        content=f"{key}: {value}",
-                        importance=7,
-                        is_permanent=True
-                    )
-            
-            # Hobiler
-            if 'hobiler' in user_data:
-                hobbies = ', '.join(user_data['hobiler'])
-                memory_manager.add_memory(
-                    user_name=user_name,
-                    memory_type='hobby',
-                    content=f"Hobiler: {hobbies}",
-                    importance=6,
-                    is_permanent=True
-                )
-            
-            # İlişkiler
-            if 'ilişkiler' in user_data:
-                for person, relation in user_data['ilişkiler'].items():
-                    memory_manager.add_memory(
-                        user_name=user_name,
-                        memory_type='relationship',
-                        content=f"{person}: {relation}",
-                        importance=9,
-                        is_permanent=True
-                    )
-        
-        logging.info("Kalıcı hafızalar memory_manager'a yüklendi")
-    except Exception as e:
-        logging.error(f"Permanent memory yükleme hatası: {e}")
+# === BAŞLANGIÇ HAFIZASI - TÜM DOSYADA KULLANILABİLİR ===
+INITIAL_MEMORIES = {
+    "Nuri Can": {
+        "kişisel": {
+            "yaş": 25,
+            "şehir": "İstanbul",
+            "ilişki_durumu": "Evli (Rabia ile)",
+            "kişilik": ["mantıklı", "meraklı", "teknolojiye düşkün", "analitik düşünmeyi seven"]
+        },
+        "çalışma": {
+            "meslek": "Siber güvenlik uzmanı",
+            "çalışma_saatleri": "Hafta içi 09:00 - 18:00",
+            "hedef": "Kendi siber güvenlik şirketini kurmak",
+            "projeler": ["AI Destekli Psikolog Terminali", "Asena Akıllı Ev Asistanı"]
+        },
+        "hobiler": ["Piyano çalmak", "Felsefe ve astrofizik okumak", "Film izlemek", "Yapay zeka projeleri geliştirmek"],
+        "alışkanlıklar": {
+            "sabah": "Kahve içmeden güne başlamaz",
+            "akşam": "Rabia ile müzik dinlemeyi sever"
+        },
+        "ilişkiler": {
+            "Rabia": "Eşi, hayat arkadaşı ve en yakın dostu",
+            "Lina": "Evdeki kedisi, genelde sabah Nuri'nin yanına gelir"
+        }
+    },
+    "Rabia": {
+        "kişisel": {
+            "yaş": 23,
+            "şehir": "Istanbul",
+            "ilişki_durumu": "Evli (Nuri Can ile)",
+            "kişilik": ["sıcakkanlı", "sabırlı", "enerjik", "çocuklarla iletişimi güçlü"]
+        },
+        "çalışma": {
+            "meslek": "Fitness ve çocuklar için jimnastik antrenörü",
+            "çalışma_yerleri": ["Fitstation Spor Merkezi"],
+            "çalışma_saatleri": {
+                "Pazartesi": "İzinli",
+                "Salı": "14:00 - 22:00",
+                "Çarşamba": "08:00 - 16:00",
+                "Perşembe": "14:00 - 22:00",
+                "Cuma": "08:00 - 16:00",
+                "Cumartesi": "14:00 - 22:00",
+                "Pazar": "08:00 - 16:00"
+            }
+        },
+        "hobiler": ["Ukulele çalmak", "Hobilerle uğraşmak (özellikle el işleri ve müzik)", "Sağlıklı tarifler denemek", "Nuri ile vakit geçirmek"],
+        "alışkanlıklar": {
+            "sabah": "Genelde erken kalkar ve hafif kahvaltı yapar",
+            "akşam": "Dizi izlemeyi veya ukulele çalışmayı sever"
+        },
+        "ilişkiler": {
+            "Nuri Can": "Eşi ve birlikte birçok proje ürettiği kişi"
+        }
+    }
+}
 
 def load_initial_memories():
     """Başlangıç hafızalarını veritabanına yükler - DÜZELTİLMİŞ"""
@@ -229,14 +188,14 @@ def load_initial_memories():
         count = c.fetchone()[0]
         
         if count > 0:
-            logging.info(" Hafızalar zaten yüklü")
+            logging.info("✅ Hafızalar zaten yüklü")
             return True
         
-        logging.info(" Başlangıç hafızaları yükleniyor...")
+        logging.info("🔄 Başlangıç hafızaları yükleniyor...")
         
         # Her kullanıcı için
         for user_name, categories in INITIAL_MEMORIES.items():
-            logging.info(f" {user_name} için hafızalar yükleniyor...")
+            logging.info(f"📝 {user_name} için hafızalar yükleniyor...")
             
             # Kişisel bilgiler
             if "kişisel" in categories:
@@ -246,7 +205,7 @@ def load_initial_memories():
                     memory_text = f"{key}: {value}"
                     c.execute(
                         """INSERT OR IGNORE INTO memories 
-                        (user_name, memory_type, content, created_at, last_accessed) 
+                        (user_name, memory_type, content, created_at, updated_at) 
                         VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
                         (user_name, "kişisel", memory_text)
                     )
@@ -271,7 +230,7 @@ def load_initial_memories():
                     
                     c.execute(
                         """INSERT OR IGNORE INTO memories 
-                        (user_name, memory_type, content, created_at, last_accessed) 
+                        (user_name, memory_type, content, created_at, updated_at) 
                         VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
                         (user_name, "çalışma", memory_text)
                     )
@@ -281,7 +240,7 @@ def load_initial_memories():
                 hobbies = ", ".join(categories["hobiler"])
                 c.execute(
                     """INSERT OR IGNORE INTO memories 
-                    (user_name, memory_type, content, created_at, last_accessed) 
+                    (user_name, memory_type, content, created_at, updated_at) 
                     VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
                     (user_name, "hobiler", f"Hobiler: {hobbies}")
                 )
@@ -291,7 +250,7 @@ def load_initial_memories():
                 for time_of_day, habit in categories["alışkanlıklar"].items():
                     c.execute(
                         """INSERT OR IGNORE INTO memories 
-                        (user_name, memory_type, content, created_at, last_accessed) 
+                        (user_name, memory_type, content, created_at, updated_at) 
                         VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
                         (user_name, "alışkanlık", f"{time_of_day}: {habit}")
                     )
@@ -301,27 +260,24 @@ def load_initial_memories():
                 for person, relation in categories["ilişkiler"].items():
                     c.execute(
                         """INSERT OR IGNORE INTO memories 
-                        (user_name, memory_type, content, created_at, last_accessed) 
+                        (user_name, memory_type, content, created_at, updated_at) 
                         VALUES (?, ?, ?, datetime('now'), datetime('now'))""",
                         (user_name, "ilişki", f"{person}: {relation}")
                     )
         
         conn.commit()
-        logging.info(" Başlangıç hafızaları başarıyla yüklendi!")
+        logging.info("✅ Başlangıç hafızaları başarıyla yüklendi!")
         
         # Kontrol et
         c.execute("SELECT COUNT(*) FROM memories")
         final_count = c.fetchone()[0]
-        logging.info(f" Toplam hafıza kaydı: {final_count}")
+        logging.info(f"📊 Toplam hafıza kaydı: {final_count}")
         
         return True
     except Exception as e:
-        logging.error(f" Hafıza yükleme hatası: {e}")
-        if conn is not None:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+        logging.error(f"❌ Hafıza yükleme hatası: {e}")
+        if conn:
+            conn.rollback()
         return False
     finally:
         if conn:
@@ -330,71 +286,70 @@ def load_initial_memories():
 # TV KOMUTLARI İÇİN GLOBAL HANDLER
 import tv_connect
 TV_IP = '192.168.1.23'
-tv_manager = get_tv_manager(TV_IP)
-
 def handle_tv_command(message):
     msg = message.lower()
     import re
-    
-    # ... existing code ...
+    # --- Ses Komutları ---
     if any(kw in msg for kw in ["sesini aç", "sesi aç"]):
-        tv_manager.connect()
-        tv_manager.volume_up(3)
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.volume_up(TV_IP, 3)
         return "Televizyonun sesi açılıyor."
     if any(kw in msg for kw in ["sesini kapat", "sesi kapat"]):
-        tv_manager.connect()
-        tv_manager.volume_down(3)
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.volume_down(TV_IP, 3)
         return "Televizyonun sesi kısılıyor."
     if any(kw in msg for kw in ["sessize", "mute"]):
-        tv_manager.connect()
-        tv_manager.mute()
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.mute(TV_IP)
         return "Televizyonun sesi tamamen kapatıldı."
     # ... x'e getir, yarıya getir, yüzde ...'ye getir gibi ---
     # "15'e getir", "yirmiye getir", "yarıya getir", "%70'e getir" gibi
     max_level = 30
     # Rakam ve sayı metinleri
-    numwords = {"sıfır":0,"bir":1,"iki":2,"üç":3,"dört":4,"beş":5,"altı":6,"yedi":7,"sekiz":8,"dokuz":9,"on":10,"onbir":11,"oniki":12,"onüç":13,"ondört":14,"onbeş":15,"onaltı":16,"onyedi":17,"onseki":18,"ondokuz":19,"yirmi":20,"yirmi bir":21,"yirmibir":21,"yirmi iki":22,"yirmi üç":23,"yirmi dört":24,"yirmi beş":25,"otuz":30}
+    numwords = {"sıfır":0,"bir":1,"iki":2,"üç":3,"dört":4,"beş":5,"altı":6,"yedi":7,"sekiz":8,"dokuz":9,"on":10,"onbir":11,"oniki":12,"onüç":13,"ondört":14,"onbeş":15,"onaltı":16,"onyedi":17,"onsekiz":18,"ondokuz":19,"yirmi":20,"yirmi bir":21,"yirmibir":21,"yirmi iki":22,"yirmi üç":23,"yirmi dört":24,"yirmi beş":25,"otuz":30}
     # Önce basit regex ile sayı bul
     match_num = re.search(r'(\d{1,2})[ \'"]*([a-zçşıöüğ]*)(?:e getir| e getir| ye getir| yap| olsun| seviye| ayarla)', msg)
     if match_num:
         level = int(match_num.group(1))
         if level > max_level: level = max_level
-        tv_manager.connect()
-        tv_manager.set_volume(level)
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.set_volume(TV_IP, level)
         return f"Televizyonun sesi {level} seviyesine ayarlandı."
     # Metin sayılarını yakala
     for w in numwords:
         if w in msg and any(x in msg for x in ["e getir","ye getir","seviye","yap","olsun"]):
-            tv_manager.connect()
+            tv_connect.connect_adb(TV_IP)
             lvl = numwords[w]
-            tv_manager.set_volume(lvl)
+            tv_connect.set_volume(TV_IP, lvl)
             return f"Televizyonun sesi {lvl} seviyesine ayarlandı."
     # Yarıya getir:
     if "yarıya getir" in msg:
-        tv_manager.connect()
-        tv_manager.set_volume(max_level//2)
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.set_volume(TV_IP, max_level//2)
         return "Televizyonun sesi yarıya getirildi."
     mpc = re.search(r'%\s*(\d+)[^\d]*?getir', msg)
     if mpc: # yüzde komutu
         percent = int(mpc.group(1))
         if percent > 100: percent = 100
         level = int(round(max_level * percent / 100))
-        tv_manager.connect()
-        tv_manager.set_volume(level)
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.set_volume(TV_IP, level)
         return f"Televizyonun sesi %{percent} seviyesine getirildi."
     if any(kw in msg for kw in ['tv aç', 'televizyon aç', 'televizyonu aç']):
-        tv_manager.power_on()
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.tv_power(TV_IP, state='on')
         return 'TV açılıyor.'
     if any(kw in msg for kw in ['tv kapat', 'televizyon kapat', 'televizyonu kapat']):
-        tv_manager.power_off()
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.tv_power(TV_IP, state='off')
         return 'TV kapatılıyor.'
     if 'netflix' in msg:
-        tv_manager.connect()
-        tv_manager.open_app('netflix')
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.open_netflix(TV_IP)
         return 'Netflix açılıyor.'
     if 'hbo' in msg or 'hbomax' in msg or 'hbo max' in msg:
-        tv_manager.connect()
-        tv_manager.open_app('hbo')
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.open_hbo_max(TV_IP)
         return 'HBO Max açılıyor.'
     # YouTube araması
     if 'youtube' in msg:
@@ -408,13 +363,13 @@ def handle_tv_command(message):
             after = msg[idx+7:]
             if 'aç' in after:
                 query = after.replace('aç','').strip()
-        tv_manager.connect()
-        if query:
-            tv_manager.youtube_search(query)
-            return f'YouTube açılıyor, arama: {query}'
-        else:
-            tv_manager.open_app('youtube')
+        if not query:
+            tv_connect.connect_adb(TV_IP)
+            tv_connect.open_app(TV_IP, "com.google.android.youtube.tv")
             return 'YouTube açılıyor.'
+        tv_connect.connect_adb(TV_IP)
+        tv_connect.open_youtube_search(TV_IP, query)
+        return f'YouTube açılıyor, arama: {query}'
     return None
 
 db_lock = threading.Lock()
@@ -471,22 +426,9 @@ def init_db():
                     user_name TEXT NOT NULL,
                     memory_type TEXT DEFAULT 'general',
                     content TEXT NOT NULL,
-                    importance INTEGER DEFAULT 5,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    last_accessed TEXT DEFAULT CURRENT_TIMESTAMP,
-                    access_count INTEGER DEFAULT 1,
-                    context_hash TEXT,
-                    is_permanent BOOLEAN DEFAULT 0,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(user_name, content)
-                )''',
-            'devices': '''
-                CREATE TABLE IF NOT EXISTS devices (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_name TEXT NOT NULL,
-                    device_id TEXT UNIQUE NOT NULL,
-                    push_token TEXT NOT NULL,
-                    last_seen TEXT DEFAULT CURRENT_TIMESTAMP,
-                    registered_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )'''
         }
         
@@ -502,10 +444,10 @@ def init_db():
         # Tablo varlığını doğrula
         c.execute("SELECT name FROM sqlite_master WHERE type='table'")
         existing_tables = [row[0] for row in c.fetchall()]
-        logging.info(f" Mevcut tablolar: {existing_tables}")
+        logging.info(f"📋 Mevcut tablolar: {existing_tables}")
         
     except sqlite3.Error as e:
-        logging.error(f" Veritabanı hatası: {e}")
+        logging.error(f"❌ Veritabanı hatası: {e}")
         raise
     finally:
         if conn:
@@ -517,13 +459,13 @@ def ensure_database():
     
     # Veritabanı yoksa veya tablolar eksikse oluştur
     if not db_exists:
-        logging.info(" Veritabanı oluşturuluyor...")
+        logging.info("🔧 Veritabanı oluşturuluyor...")
         init_db()
-        logging.info(" Veritabanı oluşturuldu.")
+        logging.info("✅ Veritabanı oluşturuldu.")
     
-    conn = None
+    # Tabloların varlığını kontrol et
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = [row[0] for row in cursor.fetchall()]
@@ -532,26 +474,24 @@ def ensure_database():
         missing_tables = [t for t in required_tables if t not in tables]
         
         if missing_tables:
-            logging.info(f" Eksik tablolar oluşturuluyor: {missing_tables}")
+            logging.info(f"🔧 Eksik tablolar oluşturuluyor: {missing_tables}")
             init_db()
-            logging.info(" Eksik tablolar oluşturuldu.")
+            logging.info("✅ Eksik tablolar oluşturuldu.")
         
         # İlk kurulumda veya tablolar yeni oluşturulduysa başlangıç verilerini yükle
         if not db_exists or missing_tables:
-            logging.info(" Başlangıç hafızaları yükleniyor...")
+            logging.info("🔄 Başlangıç hafızaları yükleniyor...")
             if load_initial_memories():
-                logging.info(" Başlangıç hafızaları başarıyla yüklendi.")
+                logging.info("✅ Başlangıç hafızaları başarıyla yüklendi.")
             else:
-                logging.warning(" Başlangıç hafızaları yüklenirken hata oluştu.")
-        
-        # Kalıcı hafızaları memory_manager'a da yükle
-        load_permanent_memories_to_manager()
+                logging.warning("⚠️ Başlangıç hafızaları yüklenirken hata oluştu.")
     except Exception as e:
-        logging.error(f" Veritabanı hatası: {e}")
+        logging.error(f"❌ Veritabanı hatası: {e}")
         raise
     finally:
         if conn:
             conn.close()
+
 def save_reminder(user_name, content, reminder_time, target_user=None):
     """
     Kullanıcı için hatırlatma oluşturur - DÜZELTİLMİŞ
@@ -686,7 +626,6 @@ def get_due_reminders(user_name):
         raise
 
 def mark_reminder_notified(reminder_id):
-    conn = None
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -719,7 +658,7 @@ def mark_reminder_notified(reminder_id):
             days = int(time_diff // (24 * 3600))
             hours = int((time_diff % (24 * 3600)) // 3600)
             
-            time_parts: list[str] = []
+            time_parts = []
             if days > 0:
                 time_parts.append(f"{days} gün")
             if hours > 0 or not time_parts:
@@ -746,11 +685,10 @@ def mark_reminder_notified(reminder_id):
         logging.error(traceback.format_exc())
         
     finally:
-        if conn:
-            try:
-                conn.close()
-            except:
-                pass
+        try:
+            conn.close()
+        except:
+            pass
 
 # Arka plan thread ile hatırlatmaları kontrol et (opsiyonel, konsola yazdırır)
 def reminder_checker():
@@ -857,59 +795,146 @@ def get_recent_conversations(user_name, limit=5):
     return [(msg, resp, ts) for msg, resp, ts in reversed(results)]
 
 def get_memories(user_name, mem_type=None):
-    """Kullanıcı için hafızaları getir - GÜNCELLENDİ"""
-    if not user_name:
-        return []
+    """Kullanıcı için hafızaları getir - GÜNCELLENDİ
     
+    Args:
+        user_name: Hafızaları getirilecek kullanıcı adı
+        mem_type: İsteğe bağlı olarak belirli bir hafıza türü (örn: 'food_preference', 'allergy')
+        
+    Returns:
+        list: Kullanıcı ve aile üyelerine ait hafızaların listesi
+    """
+    if not user_name:
+        logging.warning("❌ Geçersiz kullanıcı adı")
+        return []
+        
     conn = None
     try:
         conn = get_db_connection()
         c = conn.cursor()
         
         # 1. Kullanıcının kendi hafızalarını al
-        query = "SELECT id, user_name, memory_type, content, created_at FROM memories WHERE user_name = ?"
+        query = """
+            SELECT id, user_name, memory_type, content, created_at, updated_at
+            FROM memories 
+            WHERE user_name = ?
+            {}
+            ORDER BY updated_at DESC 
+            LIMIT 50
+        """
+        
         query_params = [user_name]
         
+        # 2. Eğer belirli bir hafıza türü belirtildiyse filtrele
         if mem_type:
-            query += " AND memory_type = ?"
+            query = query.format("AND memory_type = ?")
             query_params.append(mem_type)
-        
-        query += " ORDER BY created_at DESC LIMIT 50"
+        else:
+            query = query.format("")
+            
         c.execute(query, query_params)
         db_results = c.fetchall()
         
-        # Hafızaları formatla
+        # 3. Aile üyelerinin hafızalarını da ekle
+        family_members = ["Rabia", "Nuri Can"]
+        if user_name in family_members:
+            family_members.remove(user_name)  # Kendi hafızalarını tekrar ekleme
+            
+        if family_members:
+            family_query = """
+                SELECT id, user_name, memory_type, content, created_at, updated_at
+                FROM memories 
+                WHERE user_name IN ({})
+                {}
+                ORDER BY updated_at DESC
+                LIMIT 50
+            """.format(", ".join(["?"] * len(family_members)), 
+                       "AND memory_type = ?" if mem_type else "")
+            
+            family_params = family_members.copy()
+            if mem_type:
+                family_params.append(mem_type)
+                
+            c.execute(family_query, family_params)
+            family_results = c.fetchall()
+            db_results.extend(family_results)
+        
+        # 4. JSON içerikleri parse et ve hafızaları işle
         memories = []
-        for mem_id, mem_user, mem_type, content, created_at in db_results:
+        for mem_id, mem_user, mem_type, content, created_at, updated_at in db_results:
             try:
-                # JSON içeriği parse et
+                # İçerik JSON ise parse et, değilse olduğu gibi kullan
                 if isinstance(content, str) and (content.startswith('{') or content.startswith('[')):
                     try:
                         content = json.loads(content)
                     except json.JSONDecodeError:
-                        pass
+                        pass  # JSON parse edilemezse olduğu gibi bırak
                 
                 memory = {
                     'id': mem_id,
                     'user_name': mem_user,
                     'memory_type': mem_type,
                     'content': content,
-                    'created_at': created_at
+                    'created_at': created_at,
+                    'updated_at': updated_at
                 }
+                
+                # Özel işlem gerektiren hafıza tipleri için özet oluştur
+                if mem_type == 'food_preference':
+                    if isinstance(content, dict) and 'foods' in content and isinstance(content['foods'], list):
+                        memory['summary'] = f"{mem_user} şu yiyecekleri sever: " + ", ".join(content['foods'])
+                    elif isinstance(content, str):
+                        memory['summary'] = f"{mem_user} şu yiyeceği sever: {content}"
+                    
+                elif mem_type == 'allergy':
+                    if isinstance(content, dict) and 'allergens' in content and isinstance(content['allergens'], list):
+                        memory['summary'] = f"{mem_user} şu alerjilere sahip: " + ", ".join(content['allergens'])
+                    elif isinstance(content, str):
+                        memory['summary'] = f"{mem_user} şu alerjiye sahip: {content}"
+                
                 memories.append(memory)
+                
             except Exception as e:
                 logging.error(f"Hafıza işlenirken hata (ID: {mem_id}): {e}")
         
-        return memories
+        # 5. Eşsiz hafızaları döndür (aynı içerikten birden fazla olmaması için)
+        unique_memories = []
+        seen_contents = set()
+        
+        for mem in memories:
+            # Hafızayı benzersiz bir şekilde tanımlamak için anahtar oluştur
+            content_key = f"{mem['user_name']}:{mem['memory_type']}:"
+            
+            if isinstance(mem['content'], (str, int, float, bool)):
+                content_key += str(mem['content'])
+            elif isinstance(mem['content'], (list, dict)):
+                try:
+                    content_key += json.dumps(mem['content'], sort_keys=True)
+                except (TypeError, ValueError):
+                    content_key += str(mem['content'])
+            else:
+                content_key += str(mem['content'])
+            
+            if content_key not in seen_contents:
+                seen_contents.add(content_key)
+                unique_memories.append(mem)
+        
+        # 6. Hata ayıklama için hafıza sayısını logla
+        if mem_type:
+            logging.info(f" {len(unique_memories)} adet '{mem_type}' türünde hafıza getirildi")
+        else:
+            logging.info(f" Toplam {len(unique_memories)} adet hafıza getirildi")
+            
+        return unique_memories
         
     except sqlite3.Error as e:
-        logging.error(f"Veritabanı hatası (get_memories): {e}")
+        logging.error(f" Veritabanı hatası (get_memories): {e}")
         return []
     except Exception as e:
-        logging.error(f"Beklenmeyen hata (get_memories): {e}")
+        logging.error(f" Beklenmeyen hata (get_memories): {e}")
         return []
     finally:
-        if conn:
+        if 'conn' in locals():
             conn.close()
 
 def update_or_create_memory(user_name, mem_type, content):
@@ -919,131 +944,57 @@ def update_or_create_memory(user_name, mem_type, content):
     c.execute("SELECT id FROM memories WHERE user_name = ? AND memory_type = ?", (user_name, mem_type))
     row = c.fetchone()
     if row:
-        c.execute("UPDATE memories SET content = ? WHERE id = ?", (content, row[0]))
+        c.execute("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?", (content, now, row[0]))
     else:
-        c.execute("INSERT INTO memories (user_name, memory_type, content, created_at) VALUES (?, ?, ?, ?)",
-                  (user_name, mem_type, content, now))
+        c.execute("INSERT INTO memories (user_name, memory_type, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+                  (user_name, mem_type, content, now, now))
     conn.commit()
     conn.close()
 
 def extract_learnable_info(user_name, message):
-    """Öğrenilebilir bilgileri çıkar ve kalıcı hafızaya ekle"""
     message_lower = message.lower()
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     tomorrow = (now + timedelta(days=1)).strftime("%Y-%m-%d")
     yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Hayvan bilgileri - Negatif durumlar (artık yok)
-    if any(phrase in message_lower for phrase in ['lina yok', 'kedimiz yok', 'kedisi yok', 'lina gitti', 'lina öldü']):
-        # Lina hakkında tüm hafızaları sil
-        logging.info(f"Lina hakkındaki hafızalar temizleniyor")
-        try:
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("DELETE FROM memories WHERE user_name = ? AND content LIKE ?", (user_name, '%Lina%'))
-            c.execute("DELETE FROM memories WHERE user_name = ? AND content LIKE ?", (user_name, '%kedi%'))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            logging.error(f"Hafıza silme hatası: {e}")
-
-    # Alerji bilgileri - Kalıcı
-    if any(word in message_lower for word in ['alerjim var', 'alerjimiz var', 'alerjim oldu', 'yiyemem', 'içemem']):
-        # Alerji bilgisini belirle
-        allergy_info = message.strip()
-        memory_manager.add_memory(
-            user_name=user_name,
-            memory_type='allergy',
-            content=allergy_info,
-            importance=9,  # Yüksek önemlilik
-            is_permanent=True
-        )
-        logging.info(f"Alerji bilgisi kaydedildi: {allergy_info}")
-
-    # Yemek tercihleri - Kalıcı
-    if any(verb in message_lower for verb in ['seviyor', 'bayılıyor', 'hoşlanıyor', 'sever', 'bayılır', 'hoşlanır', 'seviyorum', 'seviyoruz']):
-        if any(food in message_lower for food in ['yemek', 'yiyecek', 'içecek', 'içki', 'tatlı', 'kahve', 'çay', 'meyve', 'sebze', 'et', 'balık']):
-            # Kiş i tercihi
-            person = 'Rabia' if 'rabia' in message_lower else 'Nuri Can' if 'nuri' in message_lower else user_name
-            preference_info = message.strip()
-            memory_manager.add_memory(
-                user_name=person,
-                memory_type='food_preference',
-                content=preference_info,
-                importance=7,
-                is_permanent=True
-            )
-            logging.info(f"Yemek tercihi kaydedildi: {preference_info}")
-
-    # Hayvan bilgileri - Kalıcı
-    if any(word in message_lower for word in ['köpek', 'kedi', 'kuş', 'balık', 'tavşan', 'hamster', 'lina', 'havlayan', 'tırmalayan']):
-        if 'var' in message_lower or 'aldık' in message_lower or 'sahibiz' in message_lower:
-            pet_info = message.strip()
-            memory_manager.add_memory(
-                user_name=user_name,
-                memory_type='pet',
-                content=pet_info,
-                importance=8,
-                is_permanent=True
-            )
-            logging.info(f"Evcil hayvan bilgisi kaydedildi: {pet_info}")
-
-    # İlişki bilgileri - Kalıcı
-    if any(word in message_lower for word in ['eşim', 'nişanım', 'erkek arkadaşım', 'kız arkadaşım', 'evli', 'nişanlı', 'flörtü']):
-        relationship_info = message.strip()
-        memory_manager.add_memory(
-            user_name=user_name,
-            memory_type='relationship',
-            content=relationship_info,
-            importance=9,
-            is_permanent=True
-        )
-        logging.info(f"İlişki bilgisi kaydedildi: {relationship_info}")
-
-    # Çalışma durumu - Kalıcı
-    if any(word in message_lower for word in ['işe gidiyorum', 'çalışıyorum', 'meslek', 'antrenör', 'uzman', 'mühendis', 'doktor', 'öğretmen']):
-        if 'değilim' not in message_lower and 'artık' not in message_lower:
-            work_info = message.strip()
-            memory_manager.add_memory(
-                user_name=user_name,
-                memory_type='work',
-                content=work_info,
-                importance=7,
-                is_permanent=True
-            )
-            logging.info(f"Çalışma bilgisi kaydedildi: {work_info}")
-
-    # Zamanlı planlar - Geçici
+    # Zamanlı planlar
     if any(word in message_lower for word in ['yarın', 'yarınki', 'yarına']):
-        memory_manager.add_memory(
-            user_name=user_name,
-            memory_type='plan',
-            content=f"[YARIN] {message}",
-            importance=5,
-            is_permanent=False
-        )
-    elif any(word in message_lower for word in ['bugün', 'bu akşam', 'bu gece', 'şu an']):
-        memory_manager.add_memory(
-            user_name=user_name,
-            memory_type='plan',
-            content=f"[BUGÜN] {message}",
-            importance=6,
-            is_permanent=False
-        )
+        update_or_create_memory(user_name, "plan", f"[YARIN] {message}")
 
-    # Hatırlatma tespiti (basit: "bana [zaman] [içerik] hatırlat" veya "rabia/nuri için [içerik] hatırlat")
+    if any(word in message_lower for word in ['bugün', 'bu akşam', 'bu gece']):
+        update_or_create_memory(user_name, "plan", f"[BUGÜN] {message}")
+
+    if 'dün' in message_lower:
+        update_or_create_memory(user_name, "memory", f"[DÜN] {message}")
+
+    # Çalışma durumu
+    if 'işe gidiyorum' in message_lower or 'çalışıyorum' in message_lower:
+        update_or_create_memory(user_name, "routine", f"Şu an işte: {message}")
+
+    # Yemek tercihleri ve alerjiler
+    if any(name in message_lower for name in ['rabia', 'nuri can', 'nurican']):
+        # Yemek sevme
+        if any(verb in message_lower for verb in ['seviyor', 'bayılıyor', 'hoşlanıyor', 'sever', 'bayılır', 'hoşlanır']):
+            if any(food in message_lower for food in ['yemek', 'yiyecek', 'içecek', 'içki', 'tatlı', 'yemesi', 'içmesi']):
+                update_or_create_memory("Rabia" if 'rabia' in message_lower else "Nuri Can", 
+                                     "food_preference", 
+                                     message.strip())
+        
+        # Alerji bilgisi
+        if any(word in message_lower for word in ['alerjisi var', 'alerjimiz var', 'alerjimiz yok', 'yiyemez', 'içemez']):
+            update_or_create_memory("Rabia" if 'rabia' in message_lower else "Nuri Can",
+                                 "allergy",
+                                 message.strip())
+
+    # Genel tercihler
+    if any(word in message_lower for word in ['seviyorum', 'seviyoruz', 'severim', 'severiz']):
+        if any(category in message_lower for category in ['yemek', 'içecek', 'müzik', 'film', 'dizi', 'aktivite']):
+            update_or_create_memory(user_name, "preference", message.strip())
+
+    # Hatırlatma tespiti (basit: "bana [zaman] [içerik] hatırlat")
     if 'hatırlat' in message_lower:
-        # Hedef kullanıcıyı belirle (eğer "X için hatırlat" şeklinde ise)
-        target_user = None
-        target_match = re.search(r'(rabia|nuri|nuri can|nuri can\')?(?: için| en)? .*?hatırlat', message_lower)
-        
-        if 'rabia' in message_lower and 'rabia için' in message_lower:
-            target_user = 'Rabia'
-        elif 'nuri' in message_lower and ('nuri için' in message_lower or 'nuri can için' in message_lower):
-            target_user = 'Nuri Can'
-        
-        # Zamanı bul
+        # Basit parsing: zamanı bul
         time_match = re.search(r'(\d{1,2}):(\d{2})', message)  # Saat:dk
         if time_match:
             hour, minute = time_match.groups()
@@ -1051,60 +1002,8 @@ def extract_learnable_info(user_name, message):
         else:
             due = (now + timedelta(hours=1)).isoformat()  # Varsayılan 1 saat sonrası
         
-        # İçeriği çıkar - HAT İRLATMA KÖLİMESİNDEN SONRA GELEN METNİ AL
-        # "Rabia için hatırlatma kurar mısın X" şeklinde - X'i çıkar
-        
-        # Hatırlat kelimesi pattern'i - tüm varyasyonları yakala
-        hatirlatma_pattern = r'hat[ıı]rlat(?:[am]*[ıı]*\s*(?:m[ıı]s[ıı]n|misin|musun|m[ıı]sin)?|mays[ıı]|mas[ıı]|mak)?(?:\s+(?:kurar|kur|edeyim|et|ede|edin)(?:\s+(?:m[ıı]s[ıı]n|misin|musun|m[ıı]sin)?)?)?'
-        
-        # İçeriği çıkar
-        content = ""
-        if 'için' in message_lower:
-            # "X için Y hatırlat" şeklinde çalış
-            parts = message.split('için')
-            if len(parts) > 1:
-                # "için" sonrası kısım
-                after_for = parts[1].strip()
-                
-                # Hatırlatma pattern'ini ara
-                match = re.search(hatirlatma_pattern, after_for, flags=re.IGNORECASE)
-                if match:
-                    # Hatırlatma kelimesinin BİTİŞİNDEN sonrası
-                    end_pos = match.end()
-                    content = after_for[end_pos:].strip()
-                else:
-                    # Eğer pattern bulunamazsa, hatırlatma kelimesini ara
-                    if 'hatırlat' in after_for.lower():
-                        parts2 = re.split(r'hatırlat\w*', after_for, maxsplit=1, flags=re.IGNORECASE)
-                        # Hatırlatmadan sonraki metni al
-                        if len(parts2) > 1:
-                            content = parts2[1].strip()
-        else:
-            # "Y hatırlat" şeklinde çalış
-            # Hatırlatma pattern'ini ara
-            match = re.search(hatirlatma_pattern, message, flags=re.IGNORECASE)
-            if match:
-                # Hatırlatma kelimesinin BİTİŞİNDEN sonrası
-                end_pos = match.end()
-                content = message[end_pos:].strip()
-            else:
-                # Eğer pattern bulunamazsa, hatırlatma kelimesini ara
-                if 'hatırlat' in message_lower:
-                    parts2 = re.split(r'hatırlat\w*', message, maxsplit=1, flags=re.IGNORECASE)
-                    # Hatırlatmadan sonraki metni al
-                    if len(parts2) > 1:
-                        content = parts2[1].strip()
-        
-        # İçerik boş ise uyarı ver ve devam etme
-        if not content:
-            logging.warning(f"Hatırlatma içeriği boş çıktı: '{message}'")
-            return
-
-        # Hatırlatmayı kaydet
-        try:
-            save_reminder(user_name, content, due, target_user=target_user)
-        except Exception as e:
-            logging.error(f"Hatırlatma kaydı hatası: {e}")
+        content = message.split('hatırlat')[-1].strip()
+        save_reminder(user_name, content, due)
 
 # === ZAMAN FONKSİYONLARI ===
 def get_time_context():
@@ -1123,94 +1022,114 @@ def get_time_context():
     }
 
 # === BAĞLAM OLUŞTURMA ===
-def build_context_prompt(user_name: str, user_message: str) -> str:
-    """GÜNCELLENMİŞ - Gelişmiş bağlam oluşturucu
-    
-    Args:
-        user_name: Kullanıcı adı
-        user_message: Kullanıcı mesajı
-        
-    Returns:
-        str: Hazırlanmış bağlam metni
-    """
+def build_context_prompt(user_name, user_message):
+    """GÜNCELLENMİŞ - Halüsinasyon önleyici prompt"""
     time_ctx = get_time_context()
     
     # Son konuşmaları getir
-    recent_convs = get_recent_conversations(user_name, limit=3)
+    recent_convs = get_recent_conversations(user_name, limit=2)
     
-    # Eski fonksiyondan hafızaları getir (geçici destek)
-    relevant_memories = get_memories(user_name)
+    # Tüm ilgili hafızaları getir (kullanıcının kendi hafızaları ve aile üyelerinin önemli hafızaları)
+    all_memories = []
     
-    # Kalıcı hafızaları memory_manager'dan getir
-    permanent_memories = memory_manager.get_relevant_memories(
-        user_name=user_name,
-        limit=10,
-        memory_types=['allergy', 'food_preference', 'pet', 'relationship', 'work']
-    )
+    # Kullanıcının tüm hafızalarını getir
+    user_memories = get_memories(user_name)
+    all_memories.extend([{
+        'memory_type': mem['memory_type'],
+        'content': mem['content'],
+        'user_name': user_name
+    } for mem in user_memories])
     
-    # Bağlam bölümlerini oluştur
-    context_sections = []
+    # Aile üyelerinin önemli hafızalarını getir (yemek tercihleri, alerjiler vb.)
+    for member in ["Rabia", "Nuri Can"]:
+        if member.lower() != user_name.lower():
+            # Sadece önemli hafızaları al
+            important_memories = get_memories(member)
+            for memory in important_memories:
+                mem_type = memory['memory_type']
+                content = memory['content']
+                if any(keyword in str(mem_type).lower() for keyword in ['food', 'yemek', 'allergy', 'alerji', 'work', 'iş', 'saat', 'time']):
+                    all_memories.append({
+                        'memory_type': f"{member}_{mem_type}",
+                        'content': content,
+                        'user_name': member
+                    })
     
-    # 1. Zaman bilgisi
-    context_sections.append(
-        f"ŞU AN: {time_ctx['date']} {time_ctx['day']}, {time_ctx['time']} ({time_ctx['time_of_day']})"
-    )
+    # Bağlamı sınırla ve kategorilere ayır
+    food_prefs = []
+    allergies = []
+    work_schedule = []
+    other_memories = []
     
-    # 2. Kalıcı hafızalar (özel bilgiler)
-    if permanent_memories:
-        permanent_text = "\n".join([
-            f"- {mem.get('content', '')}" 
-            for mem in permanent_memories
-            if mem.get('content')
-        ])
-        if permanent_text:
-            context_sections.append("KALICI HAFIZA (ÖNEMLİ BİLGİLER):\n" + permanent_text)
+    for memory in all_memories[:50]:  # Toplam 50 hafıza
+        mem_type = str(memory['memory_type']).lower()
+        content = memory['content']
+        
+        # Yemek tercihleri
+        if any(keyword in mem_type for keyword in ['food', 'yemek', 'seviyor', 'sevmeyen', 'tercih']):
+            food_prefs.append(f"- {content}")
+        # Alerjiler
+        elif any(keyword in mem_type for keyword in ['allergy', 'alerji', 'yemiyor', 'yiyemez']):
+            allergies.append(f"- {content}")
+        # İş programı
+        elif any(keyword in mem_type for keyword in ['work', 'iş', 'saat', 'time', 'çalışma']):
+            work_schedule.append(f"- {content}")
+        else:
+            other_memories.append(f"- {content}")
     
-    # 3. İlgili hafızalar (eski sistem - graduel olarak kaldırılacak)
-    if relevant_memories:
-        mem_text = "\n".join([
-            f"- {mem.get('content', '')}" 
-            for mem in relevant_memories[:3]
-            if mem.get('content')
-        ])
-        if mem_text:
-            context_sections.append("İLGİLİ HAFIZALAR:\n" + mem_text)
+    # Bağlam metinlerini oluştur
+    memory_sections = []
     
-    # 4. Son konuşmalar
-    if recent_convs:
-        conv_text = "\n".join([
-            f"- {conv[0]}"
-            for conv in recent_convs[-2:]
-        ])
-        if conv_text:
-            context_sections.append("SON KONUŞMALAR:\n" + conv_text)
+    if work_schedule:
+        memory_sections.append("İŞ PROGRAMLARI:" + "\n" + "\n".join(work_schedule))
     
-    # Tüm bağlamı birleştir
-    context = "\n\n".join(context_sections)
+    if food_prefs:
+        memory_sections.append("YEMEK TERCİHLERİ:" + "\n" + "\n".join(food_prefs))
     
-    # Sistem prompt'u oluştur
-    system_prompt = f"""Merhaba! Ben Asena, Nuri Can ve Rabia'nın ev asistanıyım.
+    if allergies:
+        memory_sections.append("ALERJİ BİLGİLERİ:" + "\n" + "\n".join(allergies))
+    
+    if other_memories:
+        memory_sections.append("DİĞER BİLGİLER:" + "\n" + "\n".join(other_memories))
+    
+    memory_text = "\n\n".join(memory_sections) if memory_sections else "- Henüz kayıtlı bilgi yok"
+    
+    # Kısa bir özet oluştur
+    summary = []
+    if work_schedule:
+        summary.append("Aile üyelerinin iş programları hakkında bilgim var.")
+    if food_prefs:
+        summary.append("Aile üyelerinin yemek tercihlerini biliyorum.")
+    if allergies:
+        summary.append("Aile üyelerinin alerjileri hakkında bilgim var.")
+    
+    summary_text = " ".join(summary) if summary else ""
+    
+    prompt = f"""Senin adın Asena. Nuri Can ve Rabia'nın ev asistanısın. Aynı zamanda genel konularda da sohbet edebilir, yemek tarifleri önerebilir ve çeşitli konularda bilgi verebilirsin.
 
-KİMLİK VE ROL:
-- Ben bir yapay zeka asistanıyım. Nuri Can veya Rabia değilim.
-- Sadece asistanı olarak görev yapıyorum.
-- Asistanlık dışında başka bir kimliğe sahip değilim.
+GERÇEK ZAMAN: {time_ctx['date']} {time_ctx['day']} {time_ctx['time']} ({time_ctx['time_of_day']})
 
-BAĞLAM BİLGİLERİ:
-{context}
+KULLANICI: {user_name}
 
-NASIL KONUŞMALIYIM:
-1. Doğal ve samimi bir dille konuş
-2. Gereksiz resmiyetten kaçın
-3. Kısa ve öz yanıtlar ver
-4. EMOJİ KULLANMA! Hiç emoji kullanma!
-5. Eğer bir konuda bilgin yoksa dürüstçe söyle
-6. Sadece bildiklerinden bahset, kurgu yapma.
-7. Türkçe'yi doğru kullan
-8. Eğer kalıcı hafızada bir bilgi güncellenirse (örneğin alerjiler, tercihler), o bilgiyi hatırla ve eskileri unut
-"""
-    
-    return system_prompt
+HAFIZAMDAN:
+{memory_text}
+
+{summary_text}
+
+KURALLAR:
+1. Yukarıdaki bilgileri KESİNLİKLE dikkate al
+2. Sadece verilen bilgiler doğrultusunda yanıt ver
+3. Bilmediğin bir şeyi asla uydurma
+4. Genel konularda (yemek, bilgi, sohbet) serbestçe yanıt verebilirsin
+5. Kısa ve net yanıtlar ver
+6. Emoji KULLANMA
+7. Eğer bir bilgi hafızanda yoksa, sadece "Bu konuda bir bilgim yok" de
+
+SORU: {user_message}
+
+YANIT:"""
+
+    return prompt
 
 # === GROQ SORGUSU ===
 def safe_turkish_text(text):
@@ -1226,233 +1145,143 @@ def safe_turkish_text(text):
     text = re.sub(r'[^\w\sçğıöşüÇĞİÖŞÜ.,!?-]', '', text)
     return text.strip()
 
-def filter_hallucinations(ai_response: str, user_name: str, user_message: str) -> str:
-    """Hafif halüsinasyon filtresi - Sadece ciddi hataları engelle
-    
-    Args:
-        ai_response: AI'nın ürettiği yanıt
-        user_name: Kullanıcı adı
-        user_message: Kullanıcı mesajı
-        
-    Returns:
-        str: Filtrelenmiş yanıt
-    """
-    if not ai_response:
-        return "Üzgünüm, bir yanıt oluşturamadım."
-    
-    response_lower = ai_response.lower()
-    
-    # SADECE KRİTİK KİMLİK KARMAŞASINI ENGELLE
-    # "Ben Nuri Can" veya "Ben Rabia" gibi açık kimlik karmaşası
-    identity_confusion_patterns = [
-        r'^ben\s+(nuri|rabia)\s+',  # "Ben Nuri" ile başlayan
-        r'\sben\s+(nuri|rabia)\.',  # "ben Nuri." diyen
-        r'benim\s+adım\s+(nuri|rabia)',  # "Benim adım Nuri"
-        r'ben\s+de\s+(nuri|rabia)',  # "Ben de Nuri"
+def filter_hallucinations(ai_response, user_name, user_message):
+    """Gelişmiş halüsinasyon filtresi"""
+    # Şüpheli ifadeler
+    suspicion_patterns = [
+        r'dün\s+[a-zçşıöüğ]*\s+(yapmıştı|hazırlamıştı|gelmişti|gitmişti)',
+        r'yarın\s+[a-zçşıöüğ]*\s+(yapacak|hazırlayacak|gelecek|gidecek)',
+        r'rabia\s+[a-zçşıöüğ]*\s+(hazırladı|yaptı|söyledi)',
+        r'nuri\s+can\s+[a-zçşıöüğ]*\s+(hazırladı|yaptı|söyledi)',
+        r'planlıyoruz|planlıyorum|hazırlık\s+yapıyor'
     ]
     
-    for pattern in identity_confusion_patterns:
-        if re.search(pattern, response_lower):
-            logging.warning(f"Kimlik karmaşası engellendi: {pattern}")
-            return "Özür dilerim, ben Asena'yım, sizin asistanınız. Size nasıl yardımcı olabilirim?"
+    # Mevcut bağlamı kontrol et
+    conversations = get_recent_conversations(user_name, limit=5)
+    memories = get_memories(user_name)
     
-    # Yanıt çok uzunsa kısalt (halüsinasyon değil, sadece uzun)
-    if len(ai_response) > 600:
-        return ai_response[:400] + "..."
+    # Convert conversations to text
+    context_text = " ".join([f"{msg} {resp}" for msg, resp, _ in conversations])
+    
+    # Convert memories to text, handling both string and dictionary content
+    memory_texts = []
+    for memory in memories:
+        if isinstance(memory, dict):
+            content = memory.get('content', '')
+            if isinstance(content, dict):
+                # Handle dictionary content (e.g., for food preferences)
+                if 'foods' in content:
+                    memory_texts.append(", ".join(content['foods']))
+                elif 'allergens' in content:
+                    memory_texts.append(", ".join(content['allergens']))
+            else:
+                # Handle string content
+                memory_texts.append(str(content))
+        else:
+            # Fallback for any unexpected memory format
+            memory_texts.append(str(memory))
+    
+    context_text += " " + " ".join(memory_texts)
+    context_text = context_text.lower()
+    
+    for pattern in suspicion_patterns:
+        if re.search(pattern, ai_response.lower()):
+            # Şüpheli ifade bağlamda var mı kontrol et
+            if not re.search(pattern, context_text) and not re.search(pattern, user_message.lower()):
+                return "Bu konuda bir bilgim yok. Lütfen daha net ifade eder misiniz?"
     
     return ai_response
 
-def analyze_conversation_style(user_message: str) -> dict:
-    """Kullanıcının konuşma tarzını analiz et
+def query_groq(user_name, user_message):
+    """GÜNCELLENMİŞ - Halüsinasyon korumalı"""
+    global groq_client
     
-    Args:
-        user_message: Kullanıcı mesajı
-        
-    Returns:
-        dict: Konuşma tarzı özellikleri
-    """
-    msg_lower = user_message.lower()
+    if not groq_client:
+        return "Üzgünüm, şu anda yanıt veremiyorum. Lütfen daha sonra tekrar deneyin."
     
-    style = {
-        'formality': 'casual',  # casual, formal, friendly
-        'length': 'short',      # short, medium, long
-        'tone': 'neutral',      # neutral, enthusiastic, calm, urgent
-        'punctuation': 'normal' # normal, excited, questioning
-    }
-    
-    # Formalite kontrolü
-    formal_words = ['lütfen', 'rica ederim', 'teşekkür ederim', 'teşekkürler']
-    casual_words = ['naber', 'selam', 'slm', 'mrb', 'nbr', 'ey', 'hey']
-    
-    if any(word in msg_lower for word in formal_words):
-        style['formality'] = 'formal'
-    elif any(word in msg_lower for word in casual_words):
-        style['formality'] = 'casual'
-    else:
-        style['formality'] = 'friendly'
-    
-    # Mesaj uzunluğu
-    word_count = len(user_message.split())
-    if word_count <= 3:
-        style['length'] = 'short'
-    elif word_count <= 10:
-        style['length'] = 'medium'
-    else:
-        style['length'] = 'long'
-    
-    # Ton analizi
-    urgent_words = ['acil', 'hemen', 'çabuk', 'acele', 'hızlı', 'şimdi']
-    enthusiastic_words = ['harika', 'süper', 'muhteşem', 'çok iyi', 'yaşa', 'bravo']
-    
-    if any(word in msg_lower for word in urgent_words):
-        style['tone'] = 'urgent'
-    elif any(word in msg_lower for word in enthusiastic_words) or '!' in user_message:
-        style['tone'] = 'enthusiastic'
-    elif '?' in user_message or any(word in msg_lower for word in ['nasıl', 'ne', 'neden', 'nerede', 'kim', 'hangi']):
-        style['tone'] = 'questioning'
-    else:
-        style['tone'] = 'neutral'
-    
-    # Noktalama analizi
-    if user_message.count('!') > 1:
-        style['punctuation'] = 'excited'
-    elif user_message.count('?') > 1:
-        style['punctuation'] = 'questioning'
-    
-    return style
-
-def build_adaptive_system_prompt(user_name: str, user_message: str, advanced_context: str) -> str:
-    """Kullanıcının tarzına göre sistem promptu oluştur
-    
-    Args:
-        user_name: Kullanıcı adı
-        user_message: Kullanıcı mesajı
-        advanced_context: Gelişmiş bağlam
-        
-    Returns:
-        str: Sistem promptu
-    """
-    style = analyze_conversation_style(user_message)
-    
-    response_style = ""
-    
-    # Formalite
-    if style['formality'] == 'formal':
-        response_style = "Kibar ama samimi konuş."
-    else:
-        response_style = "Doğal ve arkadaşça konuş."
-    
-    # Uzunluk
-    if style['length'] == 'short':
-        response_style += " Kısa yanıt ver (1-2 cümle)."
-    elif style['length'] == 'medium':
-        response_style += " Orta uzunlukta yanıt ver (2-3 cümle)."
-    else:
-        response_style += " Detaylı yanıt ver."
-    
-    # Ton
-    if style['tone'] == 'urgent':
-        response_style += " Hızlı ve direkt yanıt ver, gereksiz detay verme."
-    elif style['tone'] == 'enthusiastic':
-        response_style += " Olumlu ve enerjik ton kullan."
-    elif style['tone'] == 'questioning':
-        response_style += " Açıklayıcı ama kısa yanıt ver."
-    else:
-        response_style += " Net ve anlatışlı yanıt ver."
-    
-    system_prompt = f"""Sen Asena, {user_name}'ın AI asistanısın.
-
-Kimliğin:
-- Nuri Can ve Rabia'nın yardımcısısın
-- Akıllı, yardımsever ve empatik bir asistansın
-
-Bağlam:
-{advanced_context}
-
-Yanıt Tarzı:
-{response_style}
-
-Kurallar:
-1. Doğal ve samimi konuş
-2. Net ve anlaşılır cümleler kur
-3. Günlük konuşma dilinde yanıt ver
-4. Kullanıcının ihtiyaçlarına odaklan
-"""
-    
-    return system_prompt
-
-def query_groq(user_name: str, user_message: str) -> str:
-    """Groq API'sini kullanarak yanıt oluşturur - İyileştirilmiş Caching ve Context ile
-    
-    Args:
-        user_name: Kullanıcı adı
-        user_message: Kullanıcı mesajı
-        
-    Returns:
-        str: Oluşturulan yanıt
-    """
     try:
-        # Groq client'ının mevcut olduğunu kontrol et
-        if groq_client is None:
-            logging.error("Groq client başlatılmadı. API anahtarını kontrol edin.")
-            return "Üzgünüm, şu anda yanıt veremiyorum. Lütfen daha sonra tekrar deneyin."
+        # Öğrenilebilir bilgi varsa kaydet
+        learnable_info = extract_learnable_info(user_name, user_message)
+        if learnable_info:
+            mem_type, content = learnable_info
+            update_or_create_memory(user_name, mem_type, content)
         
-        # 1. Cache'yi kontrol et
-        cached = response_cache.get_cached_response(user_name, user_message)
-        if cached:
-            logging.info(f"Cache hit for user {user_name} - Access count: {cached['access_count']}")
-            return cached['response']
-        
-        # 2. İleri bağlam oluştur
-        advanced_context = advanced_context_builder.build_enhanced_context(
-            user_name, user_message, include_emotions=True
-        )
-        
-        # 3. Kullanıcı tarzına göre sistem promptu oluştur
-        system_prompt = build_adaptive_system_prompt(user_name, user_message, advanced_context)
+        # Bağlam oluştur
+        context = build_context_prompt(user_name, user_message)
         
         # API'ye gönderilecek mesajı oluştur
-        messages: Any = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
+        messages = [
+            {"role": "system", "content": """Sen Asena'sın. Gerçek zamanlı aile asistanısın.
+
+KURALLAR:
+1. SADECE sana verilen bilgileri kullan
+2. Asla hayali olay/kişi/plan oluşturma  
+3. Bilmiyorsan "Bu konuda bilgim yok" de
+4. Kısa, net, gerçekçi yanıtlar ver
+5. Emoji KULLANMA
+6. Gelecek tahmini YAPMA
+
+ÖRNEK YANITLAR:
+- "Bu konu hakkında bir bilgim yok"
+- "Hafızamda böyle bir kayıt bulunmuyor"
+- "Anladım, hatırlatma oluşturuyorum"
+- "Mesajını iletiyorum"
+
+Unutma: Güvenilirlik en önemli önceliğin."""},
+            {"role": "user", "content": context}
         ]
         
-        try:
-            # Groq API'sine istek gönder
-            response = groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant",
-                messages=messages,  # type: ignore
-                temperature=0.7,
-                max_tokens=500,
-                top_p=0.9,
-                frequency_penalty=0.0,
-                presence_penalty=0.0,
-                stop=None
-            )
-            
-            # Yanıtı al ve işle
-            content = response.choices[0].message.content
-            if not content:
-                ai_response = "Üzgünüm, boş bir yanıt alındı. Lütfen daha sonra tekrar deneyin."
-            else:
-                ai_response = content.strip()
-                # Halüsinasyonları filtrele
-                ai_response = filter_hallucinations(ai_response, user_name, user_message)
-                
-                # Cache'ye kaydet (confidence skoru ile)
-                response_cache.store_response(user_name, user_message, ai_response, confidence=0.85)
-                logging.info(f"Response cached for user {user_name}")
-            
-            return ai_response
-            
-        except Exception as api_error:
-            logging.error(f"Groq API hatası: {api_error}", exc_info=True)
-            return "Üzgünüm, şu anda yanıt veremiyorum. Lütfen daha sonra tekrar deneyin."
-            
+        # API çağrısı
+        response = groq_client.chat.completions.create(
+            model="openai/gpt-oss-120b",
+            messages=messages,
+            temperature=0.7,
+            max_tokens=1000,
+            top_p=1,
+            frequency_penalty=0,
+            presence_penalty=0,
+            stop=None
+        )
+        
+        # Yanıtı al ve temizle
+        ai_response = response.choices[0].message.content.strip()
+        
+        # Gelişmiş halüsinasyon filtresi uygula
+        ai_response = filter_hallucinations(ai_response, user_name, user_message)
+        
+        # Emojileri temizle
+        emoji_pattern = re.compile("["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "]+", flags=re.UNICODE)
+        ai_response = emoji_pattern.sub(r'', ai_response).strip()
+        
+        # Konuşmayı kaydet
+        save_conversation(user_name, user_message, ai_response)
+        
+        # Öğrenilebilir bilgi varsa çıkar
+        extract_learnable_info(user_name, user_message)
+        
+        return ai_response
+        
     except Exception as e:
-        logging.error(f"Sorgu hatası: {e}", exc_info=True)
+        logging.error(f"Groq API hatası: {e}", exc_info=True)
         return "Üzgünüm, bir hata oluştu. Lütfen daha sonra tekrar deneyin."
 
+# --- AI cevabında halüsinasyonu filtrele ---
+def filter_hallucination(ai_response, user_name, user_message):
+    import re
+    suspicion_words = ["dün", "yarın", "hazırlamıştı", "planlıyor", "yarın da", "yemek", "yapmak istiyor"]
+    if any(w in ai_response for w in suspicion_words):
+        conversations = get_recent_conversations(user_name, limit=10)
+        memories = get_memories(user_name)
+        context = " ".join([str(x) for x in conversations + memories]).lower()
+        for w in suspicion_words:
+            if w in ai_response and w not in context and w not in user_message.lower():
+                return "Böyle bir kayıt yok."
+    return ai_response
 
 # === ROUTES ===
 @app.route('/asena', methods=['POST'])
@@ -1463,66 +1292,25 @@ def asena():
         else:
             data = request.form.to_dict() or {'message': request.data.decode('utf-8')}
 
-        user_name = data.get('user', 'Nuri Can').strip()
-        user_message = data.get('message', str(data)).strip()
-        
-        # SADECE Nuri Can ve Rabia'ya izin ver
-        allowed_users = ['Nuri Can', 'Rabia']
-        if user_name not in allowed_users:
-            logging.warning(f"Yetkisiz kullanıcı giriş denemesi: {user_name}")
-            return jsonify({
-                "success": False, 
-                "response": "Yetkisiz erişim. Sadece Nuri Can ve Rabia kullanabilir."
-            }), 403
+        user_name = data.get('user', 'Nuri Can')
+        user_message = data.get('message', str(data))
 
         if not user_message or user_message.strip() in ['', '{}']:
             return jsonify({"success": False, "response": "Ne dedin ki?"}), 400
-            
-        try:
-            # Kullanıcı mesajını kısa süreli hafızaya ekle
-            memory_manager.update_short_term_memory(user_name, {
-                'type': 'user_message',
-                'content': user_message,
-                'timestamp': datetime.now().isoformat()
-            })
-            
-            # Bilgi güncelleme kontrolü
-            if any(x in user_message.lower() for x in ['değilim', 'artık', 'değişti', 'yanlış']):
-                if 'yaş' in user_message.lower():
-                    update_or_create_memory(user_name, "personal_info", user_message)
-                    
-            # AI yanıtını al
-            response = query_groq(user_name, user_message)
-            
-            # Konuşmayı kaydet
-            save_conversation(user_name, user_message, response)
-            
-            # Önemli bilgileri çıkar
-            extract_learnable_info(user_name, user_message)
-            
-            # Rabia için hatırlatma oluşturulmussa, yanıta bilgi ekle
-            if 'rabia için' in user_message.lower() and 'hatırlat' in user_message.lower():
-                # Rabia için hatırlatma kuruldu, AI'nin yanıtını düzenle
-                response = f"Rabia'ya hatırlatma oluşturdum. {response}"
-            elif 'hatırlat' in user_message.lower():
-                # Kendi hatırlatması durumu
-                if 'nuri için' not in user_message.lower() and 'bana' not in user_message.lower():
-                    # Kendi için hatırlatma
-                    response = f"Hatırlatma oluşturdum. {response}"
-            
-            resp = make_response(response)
-            resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
-            return resp
 
-        except Exception as api_error:
-            logging.error(f"API Hatası: {str(api_error)}", exc_info=True)
-            return jsonify({"success": False, "error": "Üzgünüm, şu anda yanıt veremiyorum. Lütfen daha sonra tekrar deneyin."}), 500
-            
+        # Bilgi güncelleme
+        if any(x in user_message.lower() for x in ['değilim', 'artık', 'değişti', 'yanlış']):
+            if 'yaş' in user_message.lower():
+                update_or_create_memory(user_name, "personal_info", user_message)
+
+        response = query_groq(user_name, user_message)
+
+        resp = make_response(response)
+        resp.headers['Content-Type'] = 'text/plain; charset=utf-8'
+        return resp
+
     except Exception as e:
-        logging.error(f"Genel Hata: {str(e)}", exc_info=True)
-        return jsonify({"success": False, "error": "Üzgünüm, bir hata oluştu. Lütfen daha sonra tekrar deneyin."}), 500
-
-
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route('/memories/<user_name>', methods=['GET'])
 def get_memories_route(user_name):
@@ -1552,7 +1340,7 @@ def health():
     conn.close()
     return jsonify({
         "status": "online",
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
         "time": get_time_context(),
         "stats": {"conversations": convs, "memories": mems, "reminders": rems}
     })
@@ -1618,419 +1406,38 @@ def register_device():
         print(f"Cihaz kaydı hatası: {str(e)}")
         return jsonify({"success": False, "error": str(e)}), 500
 
-# ============================================================================
-# YENİ ENDPOINT'LER - GELİŞTİRİLMİŞ ÖZELLİKLER
-# ============================================================================
-
-@app.route('/morning-briefing/<user_name>', methods=['GET'])
-def morning_briefing(user_name):
-    """Sabah özeti getir (hava durumu, program, ipuçları)"""
-    try:
-        hour = datetime.now().hour
-        
-        # Hava durumunu al
-        weather_service = get_weather_service()
-        weather_info = weather_service.format_weather_message("Istanbul")
-        
-        # Sabah özeti oluştur
-        briefing = proactive_assistant.generate_morning_briefing(
-            user_name=user_name,
-            weather_info=weather_info,
-            user_schedule=['09:00 İşe git', '12:00 Öğle yemeği', '18:00 İş bitti']
-        )
-        
-        # Günlük ipucu ekle
-        briefing += f"\n\n{quick_solutions.get_daily_tip()}"
-        
-        return jsonify({
-            "success": True,
-            "user": user_name,
-            "hour": hour,
-            "briefing": briefing,
-            "time": get_time_context()
-        })
-        
-    except Exception as e:
-        logging.error(f"Sabah özeti hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/weather/<city>', methods=['GET'])
-def get_weather(city="Istanbul"):
-    """Hava durumu bilgisi getir"""
-    try:
-        weather_service = get_weather_service()
-        weather = weather_service.get_weather(city)
-        
-        if not weather:
-            return jsonify({
-                "success": False,
-                "error": f"{city} için hava durumu bilgisi alınamadı"
-            }), 404
-        
-        return jsonify({
-            "success": True,
-            "city": city,
-            "weather": weather
-        })
-        
-    except Exception as e:
-        logging.error(f"Hava durumu hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/smart-home', methods=['POST'])
-def control_smart_home():
-    """Akıllı ev kontrolü"""
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = request.form.to_dict() or {}
-        
-        device = data.get('device', 'lights')
-        command = data.get('command', '')
-        
-        result = smart_home.set_device_status(device, command)
-        
-        return jsonify({
-            "success": True,
-            "device": device,
-            "command": command,
-            "result": result
-        })
-        
-    except Exception as e:
-        logging.error(f"Akıllı ev kontrolü hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/task/create', methods=['POST'])
-def create_task():
-    """Görev oluştur"""
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = request.form.to_dict() or {}
-        
-        title = data.get('title', '')
-        due_date = data.get('due_date')
-        priority = data.get('priority', 'normal')
-        
-        if not title:
-            return jsonify({"success": False, "error": "Görev başlığı gerekli"}), 400
-        
-        result = smartscheduler.create_task(title, due_date, priority)
-        
-        return jsonify({
-            "success": True,
-            "message": result,
-            "task": {
-                "title": title,
-                "due_date": due_date,
-                "priority": priority
-            }
-        })
-        
-    except Exception as e:
-        logging.error(f"Görev oluşturma hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/mood/<user_name>', methods=['POST'])
-def track_mood(user_name):
-    """Ruh halini takip et"""
-    try:
-        if request.is_json:
-            data = request.get_json()
-        else:
-            data = request.form.to_dict() or {}
-        
-        mood = data.get('mood', 'neutral')
-        intensity = int(data.get('intensity', 5))
-        
-        emotional_intelligence.track_mood(user_name, mood, intensity)
-        pattern = emotional_intelligence.detect_mood_pattern(user_name)
-        
-        return jsonify({
-            "success": True,
-            "user": user_name,
-            "mood": mood,
-            "intensity": intensity,
-            "pattern": pattern
-        })
-        
-    except Exception as e:
-        logging.error(f"Ruh hali takibi hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/wellness-suggestion', methods=['GET'])
-def wellness_suggestion():
-    """Wellness önerisi getir"""
-    try:
-        mood = request.args.get('mood', 'happy')
-        time_of_day = request.args.get('time', 'morning')
-        
-        suggestion = proactive_assistant.suggest_wellness_activity(mood, time_of_day)
-        tip = quick_solutions.get_daily_tip()
-        quote = quick_solutions.get_motivational_quote()
-        
-        return jsonify({
-            "success": True,
-            "mood": mood,
-            "time_of_day": time_of_day,
-            "wellness_suggestion": suggestion,
-            "daily_tip": tip,
-            "motivational_quote": quote
-        })
-        
-    except Exception as e:
-        logging.error(f"Wellness önerisi hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/family-context', methods=['GET'])
-def family_context():
-    """Aile bağlamı bilgisi getir"""
-    try:
-        topic = request.args.get('topic', '')
-        
-        context = family_intelligence.get_shared_context(topic)
-        activity = family_intelligence.suggest_family_activity()
-        
-        return jsonify({
-            "success": True,
-            "family_members": family_intelligence.family_members,
-            "context": context,
-            "suggested_activity": activity
-        })
-        
-    except Exception as e:
-        logging.error(f"Aile bağlamı hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/daily-summary/<user_name>', methods=['GET'])
-def daily_summary(user_name):
-    """Günlük özet getir"""
-    try:
-        time_ctx = get_time_context()
-        greeting = quick_solutions.time_aware_greeting(time_ctx['hour'], user_name)
-        tip = quick_solutions.get_daily_tip()
-        quote = quick_solutions.get_motivational_quote()
-        
-        # İstatistikleri getir
-        insights = analytics.get_user_insights(user_name)
-        
-        return jsonify({
-            "success": True,
-            "user": user_name,
-            "time_context": time_ctx,
-            "greeting": greeting,
-            "daily_tip": tip,
-            "quote": quote,
-            "insights": insights
-        })
-        
-    except Exception as e:
-        logging.error(f"Günlük özet hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
 if __name__ == '__main__':
     print("=" * 70)
     print("ASENA 2.1 – GELİŞTİRİLMİŞ AİLE ASİSTANI (HATIRLATMA DESTEKLİ)")
     print("=" * 70)
     print(f"Başlangıç: {datetime.now().strftime('%d.%m.%Y %H:%M')}")
     print("Özellikler: Tarih Bilinci • Kullanıcı Hafızası • Güncelleme • Plan Takibi • Hatırlatma Bildirimleri")
-    print("Model: Llama3-70B (Groq)")
+    print("Model: openai/gpt-oss-120b")
     print("=" * 70)
     
-    # Veritabanını başlat
+    print("\n🔧 Veritabanı kontrol ediliyor...")
     try:
-        print(" Veritabanı başlatılıyor...")
         ensure_database()
-        print(" Veritabanı başarıyla başlatıldı")
+        print("✅ Veritabanı hazır!")
     except Exception as e:
-        print(f" Veritabanı başlatılırken hata oluştu: {str(e)}")
-        raise
+        print(f"❌ Veritabanı hatası: {e}")
+        print("⚠️  Uygulama yine de başlatılıyor, ancak bazı özellikler çalışmayabilir.")
     
     # Hatırlatıcı servisini başlat
-    print(" Hatırlatıcı servisi başlatılıyor...")
-    reminder_thread = threading.Thread(target=asena_hatirlatici.check_reminders)
-    reminder_thread.daemon = True
-    reminder_thread.start()
+    print("\n🔔 Hatırlatıcı servisi başlatılıyor...")
+    try:
+        reminder_thread = asena_hatirlatici.start_reminder_service()
+        if reminder_thread:
+            print("✅ Hatırlatıcı servisi başlatıldı!")
+        else:
+            print("⚠️  Hatırlatıcı servisi başlatılamadı!")
+    except Exception as e:
+        print(f"❌ Hatırlatıcı servisi hatası: {e}")
     
-# ============================================================================
-# TV KONTROL API ENDPOİNTLERİ
-# ============================================================================
-
-@app.route('/tv/status', methods=['GET'])
-def tv_status():
-    """TV'nin mevcut durumunu getir"""
-    try:
-        state = tv_manager.get_state()
-        return jsonify({
-            "success": True,
-            "tv_state": state,
-            "available_apps": tv_manager.get_available_apps()
-        })
-    except Exception as e:
-        logging.error(f"TV status hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/power', methods=['POST'])
-def tv_power():
-    """TV'yi aç/kapat"""
-    try:
-        data = request.get_json() or {}
-        action = data.get('action', 'toggle')  # on, off, toggle
-        
-        if action == 'on':
-            success = tv_manager.power_on()
-        elif action == 'off':
-            success = tv_manager.power_off()
-        else:
-            success = tv_manager.power_on() if not tv_manager.state.is_on else tv_manager.power_off()
-        
-        return jsonify({
-            "success": success,
-            "action": action,
-            "state": tv_manager.get_state()
-        })
-    except Exception as e:
-        logging.error(f"TV power hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/volume', methods=['POST'])
-def tv_volume():
-    """TV ses seviyesini kontrol et"""
-    try:
-        data = request.get_json() or {}
-        action = data.get('action')  # set, up, down, mute
-        value = data.get('value', 1)
-        
-        if action == 'set':
-            success = tv_manager.set_volume(value)
-        elif action == 'up':
-            success = tv_manager.volume_up(value)
-        elif action == 'down':
-            success = tv_manager.volume_down(value)
-        elif action == 'mute':
-            success = tv_manager.mute()
-        else:
-            return jsonify({"success": False, "error": "Unknown action"}), 400
-        
-        return jsonify({
-            "success": success,
-            "action": action,
-            "state": tv_manager.get_state()
-        })
-    except Exception as e:
-        logging.error(f"TV volume hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/app', methods=['POST'])
-def tv_app():
-    """TV'de uygulama aç"""
-    try:
-        data = request.get_json() or {}
-        app_name = data.get('app')
-        
-        if not app_name:
-            return jsonify({"success": False, "error": "App name required"}), 400
-        
-        success = tv_manager.open_app(app_name)
-        
-        return jsonify({
-            "success": success,
-            "app": app_name,
-            "state": tv_manager.get_state()
-        })
-    except Exception as e:
-        logging.error(f"TV app hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/youtube', methods=['POST'])
-def tv_youtube():
-    """YouTube'da arama yap"""
-    try:
-        data = request.get_json() or {}
-        query = data.get('query')
-        
-        if not query:
-            return jsonify({"success": False, "error": "Query required"}), 400
-        
-        success = tv_manager.youtube_search(query)
-        
-        return jsonify({
-            "success": success,
-            "query": query,
-            "state": tv_manager.get_state()
-        })
-    except Exception as e:
-        logging.error(f"TV YouTube hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/preset', methods=['POST'])
-def tv_preset():
-    """TV preset'i oluştur veya çalıştır"""
-    try:
-        data = request.get_json() or {}
-        action = data.get('action')  # create, execute
-        
-        if action == 'create':
-            name = data.get('name')
-            commands = data.get('commands', [])
-            description = data.get('description', '')
-            
-            # Validate that name is provided
-            if not name or not isinstance(name, str):
-                return jsonify({"success": False, "error": "Preset name is required and must be a string"}), 400
-            
-            success = tv_manager.create_preset(name, commands, description)
-            return jsonify({"success": success, "preset": name})
-        
-        elif action == 'execute':
-            name = data.get('name')
-            
-            # Validate that name is provided
-            if not name or not isinstance(name, str):
-                return jsonify({"success": False, "error": "Preset name is required and must be a string"}), 400
-            
-            success = tv_manager.execute_preset(name)
-            return jsonify({
-                "success": success,
-                "preset": name,
-                "state": tv_manager.get_state()
-            })
-        else:
-            return jsonify({"success": False, "error": "Invalid action"}), 400
-    except Exception as e:
-        logging.error(f"TV preset hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/presets', methods=['GET'])
-def tv_presets():
-    """Kaydedilen preset'leri listele"""
-    try:
-        presets = tv_manager.get_presets()
-        return jsonify({
-            "success": True,
-            "presets": presets
-        })
-    except Exception as e:
-        logging.error(f"TV presets hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route('/tv/history', methods=['GET'])
-def tv_history():
-    """TV komut geçmişini getir"""
-    try:
-        limit = request.args.get('limit', 20, type=int)
-        history = tv_manager.get_command_history(limit)
-        
-        return jsonify({
-            "success": True,
-            "history": history
-        })
-    except Exception as e:
-        logging.error(f"TV history hatası: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    print("\n" + "=" * 70)
+    print("🚀 Asena başlatılıyor...")
+    print("📡 Sunucu: http://0.0.0.0:5000")
+    print("=" * 70 + "\n")
+    
+    # Uygulamayı başlat
+    app.run(host="0.0.0.0", port=5000, debug=True)
