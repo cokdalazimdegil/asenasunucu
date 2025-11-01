@@ -17,6 +17,7 @@ import sqlite3
 import re
 from functools import wraps
 from dotenv import load_dotenv
+from typing import List, Dict, Any, cast
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 
 # .env dosyasını yükle
@@ -85,7 +86,7 @@ try:
         raise ValueError("GROQ_API_KEY bulunamadı!")
 except Exception as e:
     print(f"Hata: {e}")
-    GROQ_API_KEY = "gsk_8h0geO4igEVBlnmSDWGdyb3FYlx0dJbq5oEAyN9NdxjWW1exv"
+    GROQ_API_KEY = "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"
 
 # Hatırlatıcı modülüne bildirim fonksiyonunu ilet
 asena_hatirlatici.set_notification_callback(send_notification)
@@ -399,46 +400,66 @@ def init_db():
         conn = get_db_connection()
         c = conn.cursor()
         
-        # Tabloları sırayla oluştur
-        tables = {
-            'conversations': '''
-                CREATE TABLE IF NOT EXISTS conversations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_name TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    response TEXT NOT NULL,
-                    timestamp TEXT NOT NULL
-                )''',
-            'reminders': '''
-                CREATE TABLE IF NOT EXISTS reminders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_name TEXT NOT NULL,
-                    target_user TEXT,
-                    content TEXT NOT NULL,
-                    reminder_time TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    notification_count INTEGER DEFAULT 0,
-                    notified INTEGER DEFAULT 0
-                )''',
-            'memories': '''
-                CREATE TABLE IF NOT EXISTS memories (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_name TEXT NOT NULL,
-                    memory_type TEXT DEFAULT 'general',
-                    content TEXT NOT NULL,
-                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(user_name, content)
-                )'''
-        }
+        # Kullanıcı tablosu
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
         
-        for table_name, table_sql in tables.items():
-            try:
-                c.execute(table_sql)
-                logging.info(f" Tablo oluşturuldu: {table_name}")
-            except sqlite3.Error as e:
-                logging.error(f" Tablo hatası {table_name}: {e}")
+        # Konuşma geçmişi tablosu
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS conversations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT NOT NULL,
+            message TEXT NOT NULL,
+            response TEXT NOT NULL,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
         
+        # Hatırlatıcılar tablosu
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            reminder_time DATETIME NOT NULL,
+            target_user TEXT,
+            notified BOOLEAN DEFAULT 0,
+            notification_count INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Cihazlar tablosu
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT NOT NULL,
+            device_id TEXT UNIQUE NOT NULL,
+            push_token TEXT,
+            last_seen TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Hafıza tablosu
+        c.execute('''
+        CREATE TABLE IF NOT EXISTS memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name TEXT NOT NULL,
+            memory_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # updated_at sütunu yoksa ekle
+        try:
+            c.execute('ALTER TABLE memories ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+        except sqlite3.OperationalError:
+            # Sütun zaten varsa hata verme
+            pass
+            
         conn.commit()
         
         # Tablo varlığını doğrula
@@ -626,6 +647,7 @@ def get_due_reminders(user_name):
         raise
 
 def mark_reminder_notified(reminder_id):
+    conn = None
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -685,10 +707,11 @@ def mark_reminder_notified(reminder_id):
         logging.error(traceback.format_exc())
         
     finally:
-        try:
-            conn.close()
-        except:
-            pass
+        if conn is not None:
+            try:
+                conn.close()
+            except:
+                pass
 
 # Arka plan thread ile hatırlatmaları kontrol et (opsiyonel, konsola yazdırır)
 def reminder_checker():
@@ -934,7 +957,7 @@ def get_memories(user_name, mem_type=None):
         logging.error(f" Beklenmeyen hata (get_memories): {e}")
         return []
     finally:
-        if 'conn' in locals():
+        if conn is not None:
             conn.close()
 
 def update_or_create_memory(user_name, mem_type, content):
@@ -1201,16 +1224,13 @@ def query_groq(user_name, user_message):
     
     try:
         # Öğrenilebilir bilgi varsa kaydet
-        learnable_info = extract_learnable_info(user_name, user_message)
-        if learnable_info:
-            mem_type, content = learnable_info
-            update_or_create_memory(user_name, mem_type, content)
+        extract_learnable_info(user_name, user_message)
         
         # Bağlam oluştur
         context = build_context_prompt(user_name, user_message)
         
-        # API'ye gönderilecek mesajı oluştur
-        messages = [
+        # API'ye gönderilecek mesajı oluştur - Tip güvenli
+        messages: list[dict[str, str]] = [
             {"role": "system", "content": """Sen Asena'sın. Gerçek zamanlı aile asistanısın.
 
 KURALLAR:
@@ -1234,7 +1254,7 @@ Unutma: Güvenilirlik en önemli önceliğin."""},
         # API çağrısı
         response = groq_client.chat.completions.create(
             model="openai/gpt-oss-120b",
-            messages=messages,
+            messages=messages,  # type: ignore[arg-type]
             temperature=0.7,
             max_tokens=1000,
             top_p=1,
@@ -1244,7 +1264,12 @@ Unutma: Güvenilirlik en önemli önceliğin."""},
         )
         
         # Yanıtı al ve temizle
-        ai_response = response.choices[0].message.content.strip()
+        content = response.choices[0].message.content
+        if content is None:
+            logging.warning("Groq API boş yanıt döndü")
+            return "Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin."
+        
+        ai_response = content.strip()
         
         # Gelişmiş halüsinasyon filtresi uygula
         ai_response = filter_hallucinations(ai_response, user_name, user_message)
@@ -1318,7 +1343,7 @@ def get_memories_route(user_name):
     convs = get_recent_conversations(user_name, 10)
     return jsonify({
         "user": user_name,
-        "memories": [{"type": t, "content": c, "time": tm} for t, c, tm in mems],
+        "memories": [{"type": m["memory_type"], "content": m["content"], "time": m["created_at"]} for m in mems],
         "conversations": [{"msg": m, "resp": r, "time": t} for m, r, t in convs]
     })
 
